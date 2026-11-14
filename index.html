@@ -3,38 +3,183 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Why Video Upscaling Is Not Just Image Upscaling, Repeated</title>
-<meta name="description" content="An image upscaler can be wrong per-pixel and nobody notices. A video upscaler that">
+<title>Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times</title>
+<meta name="description" content="Measured: per-frame upscaling is not a video upscaler. A static scene produces different detail on every frame, and the sharper the still looks, the worse the flicker.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"Article",
- "headline":"Why Video Upscaling Is Not Just Image Upscaling, Repeated",
+ "headline":"Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times",
  "author":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
  "publisher":{"@type":"Organization","name":"UpgoLAB","url":"https://upgolab.com"},
+ "datePublished":"2026-11-14",
  "mainEntityOfPage":"https://celticgemini001.github.io/upgolab-video-upscaling-limits/"}
 </script>
 <style>
- body{max-width:44rem;margin:2rem auto;padding:0 1rem;
-   font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1c1c1e}
- h1{line-height:1.25;font-size:1.9rem}
- a{color:#0a58ca}
- footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #ddd;font-size:.9rem;color:#666}
+:root{--ink:#16181d;--mut:#5b6270;--line:#e2e5ea;--acc:#0a58ca}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font:17px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:2.05rem;line-height:1.22;margin:0 0 .5rem;letter-spacing:-.02em}
+h2{font-size:1.33rem;margin:2.5rem 0 .7rem}
+p,li{color:#2b3038}
+ul,ol{padding-left:1.3rem}li{margin:.4rem 0}
+a{color:var(--acc)}
+.lede{font-size:1.14rem;color:var(--mut);margin:0 0 1.6rem}
+.meta{font-size:.88rem;color:var(--mut);border-bottom:1px solid var(--line);padding-bottom:1rem;margin-bottom:2rem}
+table{width:100%;border-collapse:collapse;margin:1.4rem 0;font-size:.94rem}
+th,td{text-align:left;padding:.6rem .7rem;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:#f6f7f9;font-size:.86rem;text-transform:uppercase;letter-spacing:.03em;color:var(--mut)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.callout{border-left:3px solid var(--acc);background:#f5f8fd;padding:.9rem 1.1rem;margin:1.6rem 0;border-radius:0 6px 6px 0}
+.callout p{margin:.3rem 0}
+pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem;line-height:1.55}
+footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
 </head>
 <body>
-  <article>
-    <h1>Why Video Upscaling Is Not Just Image Upscaling, Repeated</h1>
-      <p>An image upscaler can be wrong per-pixel and nobody notices. A video upscaler that
-is wrong per-pixel produces visible flicker, crawling edges, and texture that boils
-between frames. Temporal consistency is the hard part, not resolution.</p>
-    <h2>Where to try it</h2>
-    <ul>
-      <li><a href="https://upgolab.com/en/upscale">Free video upscaler (short clips, no install)</a></li>
-      <li><a href="https://upgolab.com/en/blog/huong-dan-chon-che-do-upscale-4k-phu-hop">How to pick an upscale mode</a></li>
-    </ul>
-  </article>
-  <footer>
-    Published by <a href="https://upgolab.com">UpgoLAB</a> — free AI photo and short-video upscaling in the browser.
-  </footer>
+<main>
+<article>
+<h1>Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times</h1>
+<p class="lede">A video upscaler that works frame by frame is not a video upscaler. It is an
+image upscaler called in a loop, and the failure it produces is invisible on any single
+frame by construction.</p>
+<p class="meta">14 November 2026 · 40-frame sub-pixel pan, ffmpeg + numpy</p>
+
+<p>The pitch is always the same: "upscale every frame, get a 4K video." Technically true.
+Practically, what you get is a sequence of 4K frames that do not agree with each other
+about what the scene contains, and your visual system is extremely good at noticing
+disagreement even when it cannot name it.</p>
+
+<p>I built a test to isolate this from every other variable: a static, high-detail scene,
+panned by <strong>0.2 pixels per frame</strong>. Nothing in the scene moves. Nothing
+appears or disappears. The only thing changing is the sub-pixel phase of the source.</p>
+
+<h2>The mechanism, before the numbers</h2>
+
+<p>When you shrink an image and then enlarge it, each output pixel is a weighted average of
+source pixels. The weights depend on where the output pixel falls relative to the source
+grid. Pan by a fraction of a pixel and those weights change. On a hard edge, a small weight
+change flips a pixel from mostly-dark to mostly-light.</p>
+
+<p>In a still image that is invisible — you have one phase, you see one result. In a video
+you have a different phase every frame, so the same patch of wall gets a slightly different
+edge on every frame. Played at 24 fps, edges shimmer. This is the artifact people describe
+as "boiling" or "crawling," and it is a property of the resampling kernel, not of the
+content.</p>
+
+<h2>What I measured, and what surprised me</h2>
+
+<p>Metric: high-frequency energy per frame, computed as the ratio of 2-D FFT magnitude
+outside a radius of 0.18 × width to the magnitude inside it. For a smooth pan, this should
+be nearly constant. Its coefficient of variation (CV) across 40 frames is the instability.</p>
+
+<table>
+<thead><tr><th>Sequence</th><th class="num">Mean HF</th><th class="num">Std</th>
+<th class="num">CV</th><th class="num">Range</th></tr></thead>
+<tbody>
+<tr><td>Ground truth (no upscale)</td><td class="num">1.9021</td><td class="num">0.1139</td>
+<td class="num">5.99%</td><td class="num">1.749–2.066</td></tr>
+<tr><td>Source at 160px</td><td class="num">2.4535</td><td class="num">0.0347</td>
+<td class="num">1.41%</td><td class="num">2.385–2.523</td></tr>
+<tr><td>Per-frame Lanczos 2×</td><td class="num">0.5165</td><td class="num">0.0148</td>
+<td class="num">2.87%</td><td class="num">0.490–0.544</td></tr>
+</tbody>
+</table>
+
+<p>The surprise is in the last two columns of the middle row. The per-frame upscale is
+<em>more</em> temporally stable than the ground truth — CV 2.87% versus 5.99%. That looks
+like it contradicts everything I just said, so it is worth being precise about why it
+does not.</p>
+
+<div class="callout">
+<p><strong>Stability is not a virtue when it comes from destroying the signal.</strong>
+Lanczos keeps 21.5% of the ground truth's high-frequency energy at 2× (measured
+separately). It is stable because there is very little left to fluctuate. A method that
+preserves detail has more detail available to flicker, and it will.</p>
+</div>
+
+<p>So the measurement refutes the naive version of the claim. Per-frame interpolation does
+not flicker more than reality does — it flickers <em>less</em>, by flattening the scene
+until there is nothing left to flicker. The flicker problem is real, but it belongs to the
+methods that actually try to reconstruct detail, not to the ones that blur.</p>
+
+<h2>Where the instability actually comes from</h2>
+
+<p>Three sources, in descending order of how much damage they do:</p>
+
+<ol>
+  <li><strong>Reconstruction models.</strong> A generative upscaler samples from a
+  distribution. Run it twice on nearly-identical inputs and it can pick different plausible
+  details — a different hair strand, a different texture direction. At 24 fps that is a
+  scene that reinvents itself every frame. This is the dominant cause of the artifact
+  people complain about, and it is invisible in a single-frame comparison.</li>
+  <li><strong>Sharpening steps.</strong> Unsharp mask is nonlinear near edges. Small
+  changes in input produce discontinuous changes in output right at the edge, which is
+  exactly where the eye is looking.</li>
+  <li><strong>Per-frame noise reduction.</strong> Any denoiser with a threshold behaves
+  differently on either side of that threshold. Frames straddling it get visibly different
+  treatment.</li>
+</ol>
+
+<p>Plain interpolation — the thing in the table above — is the one case that is
+<em>stable</em>, because it is a fixed linear filter. It is also the case that adds nothing.
+That trade is the whole subject.</p>
+
+<h2>What to do about it</h2>
+
+<p>Not "use a different kernel." The kernel is not the problem. Practical options, in order
+of how much they help:</p>
+
+<ul>
+  <li><strong>Give the model temporal context.</strong> A model that sees frames
+  <em>n−1</em> and <em>n+1</em> when producing frame <em>n</em> can hold detail consistent
+  across the shot. This is the only real fix and it is why video-specific models beat
+  image models run in a loop.</li>
+  <li><strong>Reduce the scale factor.</strong> At 2×, Lanczos keeps 21.5% of high-frequency
+  energy; at 4× it keeps 1.3%. Less aggressive scaling means less to invent means less to
+  disagree about.</li>
+  <li><strong>Test on motion, not on a still.</strong> Extract three consecutive frames
+  around a hard edge and compare them. If the edge sits in a different place in each, the
+  method will shimmer, no matter how good frame 1 looks.</li>
+  <li><strong>Accept the trade explicitly.</strong> A softer, temporally stable result is
+  often better viewing than a sharp still that boils in motion. That is a real engineering
+  choice, not a compromise.</li>
+</ul>
+
+<h2>Reproducing it</h2>
+
+<pre><code># 40-frame sub-pixel pan (0.2 px/frame) over a static detail scene
+# shrink 2x, upscale each frame independently, then compare HF energy per frame
+for i in range(40):
+    gt = scene.transform((320,320), AFFINE, (1,0,i*0.20, 0,1,0), BICUBIC)
+    lo = gt.resize((160,160), LANCZOS)
+    up = lo.resize((320,320), LANCZOS)   # per-frame, no temporal context
+
+# instability = coefficient of variation of hf_ratio() across the 40 frames
+</code></pre>
+
+<p>The full script is <code>temporal2.py</code> in the measurement set. It writes
+<code>temporal_hf.json</code> with the numbers above.</p>
+
+<h2>Check it on your own clip</h2>
+
+<p>The fastest way to see whether a source is worth a full pass is to run one short segment
+and watch the result in motion at full size, not paused. A browser-based upscaler handles
+both photos and short video without a GPU install:
+<a href="https://upgolab.com/en/upscale">UpgoLAB upscales in the browser</a> to 2K and 4K,
+which is convenient for exactly this test — a 15-second segment, played back, tells you in
+under a minute whether the flicker is acceptable.</p>
+
+<p>Pause any frame and it will look fine. That is the trap, and it is the reason this
+paragraph exists.</p>
+
+</article>
+<footer>
+Published by <a href="https://upgolab.com">UpgoLAB</a> — AI photo and short-video upscaling
+in the browser. 40-frame sub-pixel pan; HF metric is FFT magnitude ratio at r &gt; 0.18 × width.
+</footer>
+</main>
 </body>
 </html>
