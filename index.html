@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times</title>
-<meta name="description" content="Measured: per-frame upscaling is not a video upscaler. A static scene produces different detail on every frame, and the sharper the still looks, the worse the flicker.">
+<meta name="description" content="Measured: per-frame upscaling is not a video upscaler. The frame-to-frame stability metric I published was gameable — nearest-neighbour won it while having the worst fidelity. Three metrics, 40 frames, 2x and 4x.">
 <link rel="canonical" href="https://celticgemini001.github.io/upgolab-video-upscaling-limits/">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Why Video Upscaling Is Not Image Upscaling, Repeated 300 Times">
@@ -117,7 +117,9 @@ methods that actually try to reconstruct detail, not to the ones that blur.</p>
   people complain about, and it is invisible in a single-frame comparison.</li>
   <li><strong>Sharpening steps.</strong> Unsharp mask is nonlinear near edges. Small
   changes in input produce discontinuous changes in output right at the edge, which is
-  exactly where the eye is looking.</li>
+  exactly where the eye is looking. (Measured below: on an isolated edge this turned out
+  not to hold — sharpening <em>reduced</em> positional spread. The nonlinearity is real;
+  the direction I assumed for it was not.)</li>
   <li><strong>Per-frame noise reduction.</strong> Any denoiser with a threshold behaves
   differently on either side of that threshold. Frames straddling it get visibly different
   treatment.</li>
@@ -148,6 +150,148 @@ of how much they help:</p>
   choice, not a compromise.</li>
 </ul>
 
+<h2>The metric I was using can be gamed</h2>
+
+<p>Everything above rests on one number: the coefficient of variation of global high-frequency
+energy across frames. Before trusting the advice built on it, I tried to break it, and it
+broke easily. The failure is worth reporting because it changes what the table above actually
+means.</p>
+
+<p>Two problems. First, HF energy is a <em>global scalar</em>: one number per frame. A method
+that adds detail uniformly and a method that swaps detail locally produce identical scalars,
+but only the second one crawls, because the eye tracks local correspondence, not total
+energy. Second, and worse, the metric has a trivial optimum — blur the frame toward a constant
+and the variance goes to zero. A quietly wrong upscaler scores as the most stable one.</p>
+
+<p>So I rebuilt the measurement on the same 40-frame pan, same scene, same step of 0.20 px,
+with three metrics that fail in different directions:</p>
+
+<ul>
+  <li><strong>HF energy</strong> — high-frequency magnitude outside r = 0.18 × width, as a
+  percentage of the ground-truth frame at the same phase.</li>
+  <li><strong>Flicker</strong> — mean per-pixel |HP<sub>t</sub> − HP<sub>t−1</sub>| inside a
+  σ = 1.0 gaussian high-pass, divided by mean |HP|. Local instead of global.</li>
+  <li><strong>HF correlation</strong> — Pearson correlation between the upscaled frame's
+  high-pass band and the <em>real</em> frame's high-pass band at the same phase. This one
+  cannot be won by adding energy or by removing it. It can only be won by being right.</li>
+</ul>
+
+<table>
+<thead><tr><th>Method (2× from a 160px source)</th><th class="num">HF energy</th>
+<th class="num">Flicker</th><th class="num">HF corr</th><th class="num">corr spread</th></tr></thead>
+<tbody>
+<tr><td>Nearest</td><td class="num">56.3%</td><td class="num">15.54%</td>
+<td class="num">0.2883</td><td class="num">0.4245</td></tr>
+<tr><td>Bilinear</td><td class="num">19.5%</td><td class="num">16.09%</td>
+<td class="num">0.3952</td><td class="num">0.2108</td></tr>
+<tr><td>Lanczos</td><td class="num">26.8%</td><td class="num">16.24%</td>
+<td class="num"><strong>0.4153</strong></td><td class="num"><strong>0.1001</strong></td></tr>
+<tr><td>Bicubic</td><td class="num">26.7%</td><td class="num">16.14%</td>
+<td class="num">0.4000</td><td class="num">0.2138</td></tr>
+<tr><td>Bicubic + USM r1.2 140%</td><td class="num">56.3%</td><td class="num">17.31%</td>
+<td class="num">0.4118</td><td class="num">0.2603</td></tr>
+</tbody>
+</table>
+
+<p>Look at the first row. Nearest-neighbour has the <em>highest</em> high-frequency energy of
+any method — 56.3% of ground truth, more than double Lanczos — because blocky aliasing
+invents high-frequency content that was never in the scene. It also has the <em>lowest</em>
+flicker of any method, 15.54%. It wins both of the metrics I had been quoting. It also has
+the worst agreement with reality in the table, 0.2883, and a correlation that swings by
+0.4245 across the pan — the largest spread of any method here.</p>
+
+<div class="callout">
+<p><strong>The two numbers that made it look good are the two it cheats on.</strong> If a
+method wins on energy and on stability at the same time as losing on correlation, it is not
+stable — it is wrong in a way that holds still.</p>
+</div>
+
+<p>Lanczos has the lowest correlation <em>spread</em> by a factor of two (0.1001 versus
+0.2138 for bicubic) and the highest mean correlation. That is the property that actually
+matters in motion: not "does this frame have detail", but "does it have the same detail as
+the frame before". Bicubic's mean correlation is nearly identical — 0.4000 against 0.4153 —
+but its spread is twice as large, and spread is what the eye reads as crawling.</p>
+
+<p>This reframes the earlier table rather than contradicting it. The CV numbers were real; I
+was reading a stability metric where I should have been reading a fidelity metric. Global
+stability minus fidelity is the definition of the failure mode this article is about.</p>
+
+<h2>The flicker is not in the edge position</h2>
+
+<p>My first hypothesis was geometric: if the sub-pixel phase changes, the upscaled edge should
+land in a slightly different place each frame, and that displacement is the crawl. It is a
+clean hypothesis and it is wrong, and the way it is wrong is useful.</p>
+
+<p>Test: one isolated vertical step edge, blurred by σ = 1.0 so the position estimator has
+something to integrate, rendered at 40 phases spanning exactly one pixel, shrunk 2×, upscaled.
+Position is the centroid of |d/dx| over a ±10 px window; error is measured against the ground
+truth frame at the same phase.</p>
+
+<table>
+<thead><tr><th>Sequence</th><th class="num">RMS error</th><th class="num">max error</th>
+<th class="num">bias</th><th class="num">phase spread</th></tr></thead>
+<tbody>
+<tr><td>Source, 160px, no upscale</td><td class="num">0.567</td><td class="num">0.643</td>
+<td class="num">−0.565</td><td class="num">0.142</td></tr>
+<tr><td>Nearest 2×</td><td class="num">0.083</td><td class="num">0.143</td>
+<td class="num">−0.065</td><td class="num">0.142</td></tr>
+<tr><td>Lanczos 2×</td><td class="num">0.092</td><td class="num">0.134</td>
+<td class="num">0.007</td><td class="num">0.257</td></tr>
+<tr><td>Bicubic 2×</td><td class="num">0.068</td><td class="num">0.102</td>
+<td class="num">0.004</td><td class="num">0.183</td></tr>
+<tr><td>Bicubic + USM r1.2 140%</td><td class="num"><strong>0.056</strong></td>
+<td class="num"><strong>0.091</strong></td><td class="num">0.044</td>
+<td class="num">0.094</td></tr>
+</tbody>
+</table>
+
+<p>All four upscalers place the edge within <strong>0.092 px RMS</strong> of where it belongs.
+That is a tenth of a pixel — sub-pixel enough that no display can show it as a displaced edge.
+The un-upscaled source is the outlier at 0.567 px with a consistent −0.565 px bias, which is
+just the half-sample offset of a 2× downscale, and it is the one sequence that does not crawl.
+Edge displacement is therefore not the mechanism. Whatever the eye is seeing is happening
+inside the edge, in how its profile changes shape, not in where its centre sits.</p>
+
+<p>One incidental finding worth keeping: unsharp masking <em>improves</em> edge position
+accuracy, 0.092 → 0.056 px RMS and 0.257 → 0.094 px of phase spread, because it re-steepens
+the profile the interpolation rounded off. The sharpening step is not creating the jitter
+here. It is compensating for it, which is the opposite of what the ordering in my earlier list
+of culprits suggested.</p>
+
+<h2>What "reduce the scale factor" is actually worth</h2>
+
+<p>The article says a smaller scale factor helps because there is less to invent. That is
+qualitative, so I measured it: identical scene, identical kernels, 2× and 4×. To compare
+fairly I report detail per unit of crawl — flicker divided by HF energy, where lower is
+better — because a method can always lower flicker by lowering detail.</p>
+
+<table>
+<thead><tr><th>Scale</th><th class="num">HF energy</th><th class="num">Flicker</th>
+<th class="num">flicker / energy</th></tr></thead>
+<tbody>
+<tr><td>2× Lanczos</td><td class="num">26.8%</td><td class="num">16.24%</td>
+<td class="num">0.61</td></tr>
+<tr><td>4× Lanczos</td><td class="num">8.0%</td><td class="num">16.55%</td>
+<td class="num">2.08</td></tr>
+<tr><td>2× Bicubic</td><td class="num">26.7%</td><td class="num">16.14%</td>
+<td class="num">0.61</td></tr>
+<tr><td>4× Bicubic</td><td class="num">8.2%</td><td class="num">15.90%</td>
+<td class="num">1.95</td></tr>
+</tbody>
+</table>
+
+<p>Going from 2× to 4× costs <strong>3.4×</strong> in detail per unit of flicker for both
+kernels (0.61 → 2.08). The mechanism is visible in the middle column: flicker barely moves,
+16.24% → 16.55%, while detail collapses, 26.8% → 8.0%. At 4× the interpolation is not
+introducing instability; it is introducing so little detail that instability has nothing to
+act on, and the ratio is what exposes that. The advice holds, and now it has a magnitude.</p>
+
+<p>And the caveat the ratio itself demands: nearest-neighbour scores 0.28 at 2× and 0.25 at
+4×, better than ground truth's 0.26, purely by having the lowest flicker and inflated energy.
+Any "detail per crawl" figure has to be gated behind the correlation column, or it will
+recommend the ugliest option in the table. That is the same trap as the original metric, one
+level up, and I only found it because I ran the correlation.</p>
+
 <h2>Reproducing it</h2>
 
 <pre><code># 40-frame sub-pixel pan (0.2 px/frame) over a static detail scene
@@ -158,10 +302,27 @@ for i in range(40):
     up = lo.resize((320,320), LANCZOS)   # per-frame, no temporal context
 
 # instability = coefficient of variation of hf_ratio() across the 40 frames
+
+# --- and the three metrics that can't be gamed the same way ---
+def highpass(a):                 # detail band, sigma = 1.0
+    im = Image.fromarray(a.astype('uint8'))
+    return a - np.asarray(im.filter(ImageFilter.GaussianBlur(1.0)), float)
+
+flicker = 100 * np.mean([np.abs(highpass(f[i]) - highpass(f[i-1]))[4:-4,4:-4].mean()
+                         for i in range(1, 40)]) \
+             / np.mean([np.abs(highpass(f)[4:-4,4:-4]).mean() for f in f])
+
+hf_corr = np.corrcoef(highpass(up_frame).ravel(),
+                      highpass(gt_frame).ravel())[0, 1]
 </code></pre>
 
-<p>The full script is <code>temporal2.py</code> in the measurement set. It writes
-<code>temporal_hf.json</code> with the numbers above.</p>
+<p>The full scripts are <code>temporal2.py</code> (the original CV metric, writes
+<code>temporal_hf.json</code>), <code>metric_exploits.py</code> (the three-metric table, writes
+<code>metric_exploits.json</code>), <code>edge_position.py</code>
+(<code>edge_position.json</code>) and <code>flicker_normalised.py</code>
+(<code>flicker_normalised.json</code>). All four are deterministic: running them twice
+produces byte-identical output, since every frame is generated from a fixed seedless drawing
+routine rather than a random one.</p>
 
 <h2>Check it on your own clip</h2>
 
