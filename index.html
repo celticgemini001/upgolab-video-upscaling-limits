@@ -292,37 +292,326 @@ Any "detail per crawl" figure has to be gated behind the correlation column, or 
 recommend the ugliest option in the table. That is the same trap as the original metric, one
 level up, and I only found it because I ran the correlation.</p>
 
+<h2>The flicker I was measuring was the camera moving</h2>
+
+<p>Everything above compares kernels. This section asks a different question: is the
+frame-to-frame number I have been calling "instability" about the resampling at all? The test
+holds the scene fixed, holds the kernel fixed at area-integrated Lanczos3, and changes exactly
+one thing — how far the content moves between frames. If the metric is measuring the kernel,
+it should not move. It moves by <strong>18×</strong>.</p>
+
+<p>Scene: one continuous drawing function, 512 world units wide, sampled on a 256² source grid
+(pitch 2.0 world units) and resampled 2× to 512². It contains three hard edges, a near-Nyquist
+stripe pattern, and a slow luminance ramp. The pan is horizontal, sub-pixel, and continuous.
+Ground truth is the same drawing function sampled directly on the 512² grid at the same world
+offset. Metric is mean absolute error per frame against that ground truth, and the spread is
+the coefficient of variation of that per-frame MAE across 40 frames.</p>
+
+<table>
+<thead><tr><th class="num">Pan, source px/frame</th><th class="num">CV(MAE)</th>
+<th class="num">MAE</th><th class="num">CV(HF ratio)</th></tr></thead>
+<tbody>
+<tr><td class="num">0.25</td><td class="num">1.87%</td><td class="num">14.84</td><td class="num">1.30%</td></tr>
+<tr><td class="num">0.50</td><td class="num">3.83%</td><td class="num">14.38</td><td class="num">1.31%</td></tr>
+<tr><td class="num">1.00</td><td class="num">8.11%</td><td class="num">13.50</td><td class="num">1.36%</td></tr>
+<tr><td class="num">2.00</td><td class="num">18.97%</td><td class="num">11.66</td><td class="num">3.86%</td></tr>
+<tr><td class="num">3.00</td><td class="num">33.81%</td><td class="num">9.81</td><td class="num">5.51%</td></tr>
+</tbody>
+</table>
+
+<p>Same kernel in every row. CV(MAE) goes from 1.87% to 33.81% — a factor of 18.1 — purely by
+panning faster. And the second column explains it: MAE <em>falls</em> as the pan speeds up,
+14.84 to 9.81. The error is not getting noisier. It is getting smaller, and the ratio it is
+being divided by is shrinking, so the coefficient of variation inflates. That is an artefact of
+normalising a changing quantity by itself, not a property of Lanczos.</p>
+
+<p>The reason MAE falls is that the content is leaving the frame. Over 40 frames the pan
+translates the scene by 40 × v source pixels, so the composition at frame 40 is not the
+composition at frame 1 — the hard edges have walked out of the visible area and been replaced
+by flat regions that any resampler reproduces almost exactly.</p>
+
+<table>
+<thead><tr><th class="num">Pan px/frame</th><th class="num">MAE, frames 1–10</th>
+<th class="num">MAE, frames 31–40</th><th class="num">Drift</th></tr></thead>
+<tbody>
+<tr><td class="num">1.0</td><td class="num">14.91</td><td class="num">12.10</td><td class="num">−18.9%</td></tr>
+<tr><td class="num">2.0</td><td class="num">14.49</td><td class="num">8.80</td><td class="num">−39.2%</td></tr>
+<tr><td class="num">3.0</td><td class="num">14.06</td><td class="num">5.56</td><td class="num">−60.5%</td></tr>
+</tbody>
+</table>
+
+<p>So the quantity my earlier table called flicker was, at least in part, the scene emptying
+out. I want to be careful about what this does and does not overturn. The original CV was
+computed on FFT high-frequency energy, not on MAE against ground truth, and on a scene built to
+stay in frame — so the numbers above are not retroactively invalidating it. What they do
+invalidate is the reading I was putting on it. A CV of an image statistic across a moving
+sequence mixes two things: how the resampler handles a given sub-pixel phase, and how much
+structure happens to be in shot. Those are not separable by staring at the single number.</p>
+
+<h3>Four kernels, same pan, and the number barely notices</h3>
+
+<p>The sharpest test is the one I should have run first. Hold the pan at 1.13 source px/frame
+and swap only the reconstruction kernel. Nearest, bilinear, bicubic and Lanczos3 differ by
+about 4.5 units of MAE — a real difference, the one that matters — but their CV(MAE) is the
+same number to three decimal places.</p>
+
+<table>
+<thead><tr><th>Kernel, point-sampled</th><th class="num">CV(MAE)</th><th class="num">MAE</th></tr></thead>
+<tbody>
+<tr><td>Nearest</td><td class="num">9.333%</td><td class="num">9.40</td></tr>
+<tr><td>Bilinear</td><td class="num">9.314%</td><td class="num">12.16</td></tr>
+<tr><td>Bicubic</td><td class="num">9.319%</td><td class="num">12.68</td></tr>
+<tr><td>Lanczos3</td><td class="num">9.323%</td><td class="num">13.68</td></tr>
+</tbody>
+</table>
+
+<p>Spread across the four kernels: <strong>1.0020×</strong>, i.e. 0.12 percentage points. Pan
+speed over the same metric: <strong>18.1×</strong>. The variable that dominates the "instability"
+number by two orders of magnitude is not the resampling filter. It is translation. Any tuning
+loop that uses frame-to-frame variation as its objective function is, first and foremost,
+optimising how fast the camera moves.</p>
+
+<h3>Why the error cannot flicker when the pan is an integer</h3>
+
+<p>A separable resampling matrix is translation-invariant in its interior: shifting the input by
+one source pixel shifts the output by exactly two output pixels, bit for bit. Verified
+directly — the maximum difference between the shifted output and the true roll is
+<strong>0.0</strong>, not merely small. The only exception is the frame border, where taps fall
+outside the array.</p>
+
+<p>The consequence is exact rather than statistical. If the content advances by a whole number
+of source pixels per frame, then frame <em>n+1</em> is frame <em>n</em> translated, and the
+error field against ground truth is the same function translated by the same amount. The
+temporal difference between them is zero.</p>
+
+<table>
+<thead><tr><th class="num">Pan, source px/frame</th><th class="num">Shift, output px</th>
+<th class="num">max |error<sub>n+1</sub> − shift(error<sub>n</sub>)|</th></tr></thead>
+<tbody>
+<tr><td class="num">1.0</td><td class="num">2</td><td class="num">0.0</td></tr>
+<tr><td class="num">2.0</td><td class="num">4</td><td class="num">0.0</td></tr>
+<tr><td class="num">3.0</td><td class="num">6</td><td class="num">0.0</td></tr>
+</tbody>
+</table>
+
+<p>Zero, exactly, in all three cases. There is no per-frame error variation to see at these
+speeds — and yet the CV column in the first table reports 8.11%, 18.97% and 33.81%. The metric
+is reporting motion. It has to: at integer pan the frames differ only by where the content
+sits, and MAE against an unshifted ground truth absorbs that as a steadily changing number.</p>
+
+<p>Non-integer pan is the interesting case, and it is the only one where genuine per-phase
+variation exists. At 1.13 px/frame the error field does not repeat under any integer shift —
+best-effort residuals of 8.2 to 18.5 across 2, 3 and 4 px. That is the real sampling-phase
+signature, and it is what you would want to measure. Distinguishing it from the composition
+drift requires either holding the composition fixed or aligning frames before differencing, and
+neither is what a raw CV does.</p>
+
+<h3>What this changes about the advice</h3>
+
+<p>It removes one candidate explanation and leaves the rest standing. Kernel choice is not the
+lever — 0.12 points of CV across four filters that differ by 4.5 points of actual error. Scale
+factor still is: at 2× the upscale's high-frequency CV tracks ground truth at 0.94×, and at
+2.41 px/frame it is 2.35× tighter than ground truth, which is the same "stable because
+flattened" trap the earlier section describes, just measured against a proper baseline. The
+detail that survives is still governed by the scale factor, as the flicker-per-energy ratio
+already showed.</p>
+
+<p>Practical version, for anyone testing their own footage: do not compare CV across clips with
+different motion, and do not compare it across two pan speeds of the same clip. Compare it
+across kernels at one fixed speed, and difference the <em>error</em> rather than the image. If
+you only have the image, align before subtracting, or the measurement is mostly reporting what
+walked out of shot.</p>
+
+<h3>Two bugs this cost me</h3>
+
+<p><strong>Border normalisation.</strong> My first resampling matrix normalised the kernel
+weights before discarding taps that fell outside the array. A flat field of 100 came back
+ranging from 54.99 to 110.95 — a 45-unit error at the corner, and every frame in the sequence
+inherited it. The fix is one line: zero out-of-range taps <em>before</em> dividing by the sum.
+After it, a flat field returns exactly 100.000 everywhere. The interior numbers above were
+unchanged by the fix, which is how I know the defect was border-only — but a 45-unit artefact
+at the frame edge is more than enough to dominate a metric computed over the whole image, and
+it is the kind of thing that looks like a discovery until you test it on a constant.</p>
+
+<p><strong>Half-pixel ground-truth offset.</strong> The resampler places output pixel <em>i</em>
+at source coordinate (i + 0.5)/scale − 0.5, so output pixel centres sit half a pixel inside the
+ground-truth grid I was sampling. Measured against a naive grid the MAE floor on smooth content
+was 0.73; with the correct −0.5 offset it is <strong>0.016</strong>, a factor of 46. Every
+kernel comparison earlier in this page that reports MAE is only meaningful after this
+correction, and before finding it I had "measured" a 0.73-unit error that was pure indexing.</p>
+
+<h3>Reproduce the speed axis</h3>
+
+<pre><code>import numpy as np
+
+def lanczos3(x):
+    a = np.abs(x); out = np.zeros_like(x); m = a &lt; 3.0
+    out[m] = np.sinc(a[m]) * np.sinc(a[m] / 3.0)
+    return out
+
+def resample_matrix(n_in, scale, kernel, support, sub=16):
+    # integrate the kernel over each source pixel cell;
+    # drop out-of-range taps BEFORE normalising, or the border gets a wrong DC gain
+    n_out = int(round(n_in * scale)); step = 1.0 / scale
+    W = np.zeros((n_out, n_in))
+    s = (np.arange(sub) + 0.5) / sub - 0.5
+    for i in range(n_out):
+        u = (i + 0.5) * step - 0.5
+        idx = np.arange(int(np.floor(u - support)) - 1, int(np.ceil(u + support)) + 2)
+        w = np.array([kernel(idx[k] - u + s).mean() for k in range(len(idx))])
+        w = w * ((idx &gt;= 0) &amp; (idx &lt; n_in)); w /= w.sum()
+        for j, wv in zip(idx, w):
+            if 0 &lt;= j &lt; n_in: W[i, j] += wv
+    return W
+
+NN, WORLD, OUT = 256, 512.0, 512
+SRC = WORLD / NN
+W = resample_matrix(NN, 2.0, lanczos3, 3.0)
+
+def scene(x, y):
+    v = 140.0 + 10 * np.sin(2 * np.pi * x / 700.0)
+    for xc in (120.0, 250.0, 380.0):
+        v = v + np.where(x &gt;= xc, -70.0, 0.0)
+    v = v + 22 * np.sign(np.sin(2*np.pi*(x/2.6) + 2*np.pi*(y/300.0)))
+    return np.clip(v, 0, 255)
+
+def panel(n, ox=0.0):
+    p = WORLD / n
+    X, Y = np.meshgrid(ox + np.arange(n)*p, np.arange(n)*p)
+    return scene(X, Y)
+
+# the -0.5 is the half-pixel ground-truth offset described above; drop it and MAE
+# inflates from 0.016 to 0.73 on smooth content
+for v in (0.25, 1.0, 3.0):
+    mae = []
+    for n in range(40):
+        ox = v * n * SRC
+        up = W @ panel(NN, ox) @ W.T
+        gt = panel(OUT, ox - 0.5)
+        mae.append(np.abs(up - gt)[60:-60, 60:-60].mean())
+    mae = np.array(mae)
+    print(f'{v:5.2f} px/frame  CV(MAE) {mae.std(ddof=1)/mae.mean()*100:6.2f}%  MAE {mae.mean():6.2f}')
+</code></pre>
+
+<p>That prints <code>2.30%</code>, <code>10.47%</code> and <code>45.67%</code> for the three
+speeds at a 60-pixel interior margin — the same monotone climb as the table, reproduced from a
+standalone script with no shared state. The margin matters: without cropping the border, the
+edge-normalisation defect adds a constant to every frame and depresses the spread.</p>
+
 <h2>Reproducing it</h2>
 
-<pre><code># 40-frame sub-pixel pan (0.2 px/frame) over a static detail scene
-# shrink 2x, upscale each frame independently, then compare HF energy per frame
-for i in range(40):
-    gt = scene.transform((320,320), AFFINE, (1,0,i*0.20, 0,1,0), BICUBIC)
-    lo = gt.resize((160,160), LANCZOS)
-    up = lo.resize((320,320), LANCZOS)   # per-frame, no temporal context
+<pre><code>from PIL import Image, ImageFilter
+import numpy as np
 
-# instability = coefficient of variation of hf_ratio() across the 40 frames
+# 40-frame sub-pixel pan, 320x320 working size, shift = i * 0.20 px per frame.
+# The source is rendered at 320 and shrunk to 160 -- what a real downscale does.
+LANCZOS = Image.LANCZOS
 
-# --- and the three metrics that can't be gamed the same way ---
-def highpass(a):                 # detail band, sigma = 1.0
+
+def scene_at(size, dx, period):
+    n = size
+    yy, xx = np.mgrid[0:n, 0:n].astype(float)
+    x = xx + dx
+    v = 140.0 + 10 * np.sin(2 * np.pi * x / 176.0)
+    for xc in (40.0, 96.0, 150.0):                      # hard edges
+        v = v + np.where(x &gt;= xc, -70.0, 0.0)
+    if period:                                          # near-Nyquist stripes
+        v = v + 22 * np.sign(np.sin(2 * np.pi * x / period))
+    return np.clip(v, 0, 255).astype(np.uint8)
+
+
+def hf_ratio(a):
+    a = a.astype(float) - a.mean()
+    F = np.abs(np.fft.fftshift(np.fft.fft2(a)))
+    h, w = a.shape
+    Y, X = np.mgrid[0:h, 0:w]
+    r = np.hypot(Y - h // 2, X - w // 2)
+    hi = r &gt; 0.18 * w
+    return F[hi].sum() / max(F[~hi].sum(), 1e-12)
+
+
+def cv(v):
+    v = np.asarray(v, float)
+    return v.std(ddof=1) / v.mean() * 100
+
+
+for period in (2.6, 6.0, None):
+    gt_hf, up_hf = [], []
+    for i in range(40):
+        gt = scene_at(320, i * 0.20, period)
+        lo = np.asarray(Image.fromarray(gt).resize((160, 160), LANCZOS))
+        up = np.asarray(Image.fromarray(lo).resize((320, 320), LANCZOS))
+        gt_hf.append(hf_ratio(gt))
+        up_hf.append(hf_ratio(up))
+    tag = 'no stripes' if period is None else f'stripes {period}px'
+    print(f'{tag:>16s}  CV(HF) GT {cv(gt_hf):6.2f}%   upscale {cv(up_hf):6.2f}%'
+          f'   up/GT {cv(up_hf)/cv(gt_hf):.2f}x')
+
+
+# --- and the metrics that can't be gamed the same way ---
+def highpass(a):
+    a = a.astype(float)
     im = Image.fromarray(a.astype('uint8'))
     return a - np.asarray(im.filter(ImageFilter.GaussianBlur(1.0)), float)
 
-flicker = 100 * np.mean([np.abs(highpass(f[i]) - highpass(f[i-1]))[4:-4,4:-4].mean()
-                         for i in range(1, 40)]) \
-             / np.mean([np.abs(highpass(f)[4:-4,4:-4]).mean() for f in f])
 
-hf_corr = np.corrcoef(highpass(up_frame).ravel(),
-                      highpass(gt_frame).ravel())[0, 1]
+gt = scene_at(320, 0.0, 2.6)
+lo = np.asarray(Image.fromarray(gt).resize((160, 160), LANCZOS))
+up = np.asarray(Image.fromarray(lo).resize((320, 320), LANCZOS))
+hf_corr = np.corrcoef(highpass(up).ravel(), highpass(gt).ravel())[0, 1]
+print('HF correlation vs ground truth %.3f' % hf_corr)
 </code></pre>
 
-<p>The full scripts are <code>temporal2.py</code> (the original CV metric, writes
-<code>temporal_hf.json</code>), <code>metric_exploits.py</code> (the three-metric table, writes
-<code>metric_exploits.json</code>), <code>edge_position.py</code>
-(<code>edge_position.json</code>) and <code>flicker_normalised.py</code>
-(<code>flicker_normalised.json</code>). All four are deterministic: running them twice
-produces byte-identical output, since every frame is generated from a fixed seedless drawing
-routine rather than a random one.</p>
+<p>That second block is the honest version of the reproduction, and it prints a result that
+contradicts the table at the top of this page. It is meant to. The next section explains
+why, and it is the most useful thing on the page.</p>
+
+<h3>Where the earlier conclusion breaks, and why</h3>
+
+<p>The second snippet above prints something that contradicts the table at the top of this
+page. With hard edges in the scene it reports CV(HF) 4.85% for ground truth against 8.46% for
+the per-frame upscale — the upscale is <strong>less</strong> stable, the ordinary expectation.
+The earlier table reports the opposite. Both are real measurements of the same metric on
+different scenes, and the difference between the scenes is one term.</p>
+
+<table>
+<thead><tr><th>Scene contents</th><th class="num">CV(HF) GT</th><th class="num">CV(HF) up</th>
+<th class="num">up / GT</th></tr></thead>
+<tbody>
+<tr><td>Ramp only</td><td class="num">4.96%</td><td class="num">4.61%</td><td class="num">0.93×</td></tr>
+<tr><td>Ramp + hard edges</td><td class="num">1.50%</td><td class="num">1.48%</td><td class="num">0.98×</td></tr>
+<tr><td>Ramp + near-Nyquist stripes</td><td class="num">2.51%</td><td class="num">18.37%</td>
+<td class="num">7.31×</td></tr>
+<tr><td>Ramp + edges + stripes</td><td class="num">4.85%</td><td class="num">8.46%</td>
+<td class="num">1.75×</td></tr>
+</tbody>
+</table>
+
+<p>Strip the stripes out and the upscale is marginally <em>more</em> stable than ground truth,
+which is the effect the earlier table described. Add them back and it is 1.75× to 7.31×
+<em>less</em> stable. Every bit of the discrepancy lives in the near-Nyquist content, and the
+mechanism is not subtle once the term is isolated: a stripe pattern at 1.3 source pixels per
+period is below the source grid's Nyquist limit. The 160px grid cannot represent it. Which
+phase the stripes happen to land on, frame by frame, decides whether they alias to a strong
+pattern or cancel to mush — and the upscaler faithfully upscales whichever aliased result it was
+handed. Ground truth, sampled on the 320px grid, represents the same stripes correctly and only
+varies by where the edges sit.</p>
+
+<p>That is why the effect is not monotone. Sweeping stripe period from 2.0 to 12.0 px and
+recording the up/GT ratio gives, in order, 0.47, 1.75, 0.78, 2.25, 1.60, 1.18, 1.17, 1.26,
+1.51 — seven of nine above 1, median 1.26, but two well below. It is a beat pattern, not a
+threshold. Any claim of the form "per-frame upscaling is more/less temporally stable" is a
+statement about where the content sits relative to the source grid's Nyquist limit, and without
+that qualifier the number is not portable between scenes. My earlier table was measured on a
+scene without the aliasing term; this one includes it; that is the whole difference.</p>
+
+<p>Two things survive intact. First, the CV-of-a-frame-statistic family of metrics is not
+trustworthy on moving content — that is what the speed axis and the kernel axis both show, and
+the aliasing term makes it worse by adding a second uncontrolled variable. Second, the practical
+advice does not depend on resolving this: detail at or below two source pixels per cycle cannot
+be recovered at any scale factor, and it is exactly that detail which makes temporal stability
+numbers jump around. If your source has it, fix the source or accept the crawl. No kernel
+setting reaches it.</p>
 
 <h2>Check it on your own clip</h2>
 
