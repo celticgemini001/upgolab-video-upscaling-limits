@@ -37,6 +37,15 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 pre{background:#f7f8fa;border:1px solid var(--line);border-radius:8px;padding:1rem;overflow-x:auto;font-size:.86rem;line-height:1.55}
 footer{margin-top:4rem;padding-top:1.4rem;border-top:1px solid var(--line);font-size:.9rem;color:var(--mut)}
 </style>
+<style>
+.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
+.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#5b6270;margin:0 0 .6rem}
+.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
+.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
+.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
+.sisternav a:hover{border-bottom-color:#0a58ca}
+</style>
 </head>
 <body>
 <main>
@@ -103,7 +112,7 @@ preserves detail has more detail available to flicker, and it will.</p>
 <p>So the measurement refutes the naive version of the claim. Per-frame interpolation does
 not flicker more than reality does — it flickers <em>less</em>, by flattening the scene
 until there is nothing left to flicker. The flicker problem is real, but it belongs to the
-methods that actually try to reconstruct detail, not to the ones that blur.</p>
+methods that actually try to reconstruct detail, not to the ones that <a href="https://celticgemini001.github.io/upgolab-motion-blur-before-upscale/">blur</a>.</p>
 
 <h2>Where the instability actually comes from</h2>
 
@@ -135,7 +144,7 @@ That trade is the whole subject.</p>
 of how much they help:</p>
 
 <ul>
-  <li><strong>Give the model temporal context.</strong> A model that sees frames
+  <li><strong>Give the model <a href="https://celticgemini001.github.io/upgolab-old-footage-restoration/">temporal</a> context.</strong> A model that sees frames
   <em>n−1</em> and <em>n+1</em> when producing frame <em>n</em> can hold detail consistent
   across the shot. This is the only real fix and it is why video-specific models beat
   image models run in a loop.</li>
@@ -629,16 +638,6 @@ paragraph exists.</p>
 <footer>
 Published by <a href="https://upgolab.com">UpgoLAB</a> — AI photo and short-video upscaling
 in the browser. 40-frame sub-pixel pan; HF metric is FFT magnitude ratio at r &gt; 0.18 × width.
-
-<style>
-.sisternav{margin:2rem 0 0;padding-top:1.2rem;border-top:1px solid #e2e5ea}
-.sisternav p{font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;
- color:#5b6270;margin:0 0 .6rem}
-.sisternav ul{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.4rem .9rem}
-.sisternav li{margin:0;font-size:.88rem;line-height:1.4}
-.sisternav a{text-decoration:none;border-bottom:1px solid #d5dae2}
-.sisternav a:hover{border-bottom-color:#0a58ca}
-</style>
 
 <nav class="sisternav" aria-label="More measured upscaling guides">
 <p>More measured guides</p>
